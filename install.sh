@@ -204,3 +204,142 @@ printf "\n👉 Bước tiếp theo:\n"
 printf "  1) Cài & mở ứng dụng Termux X11 (APK).\n"
 printf "  2) Quay lại Termux và chạy: \033[1m~/start-debian-x11\033[0m\n"
 printf "     (hoặc: \033[1mdebian-x11\033[0m nếu đã mở session mới)\n"
+say "Cài đặt lệnh tiện ích X11 & launcher…"
+mkdir -p "$HOME/.local/bin"
+touch "$HOME/.debian-x11.conf"
+printf 'USER_NAME=%s\n' "$USER_NAME" > "$HOME/.debian-x11.conf"
+
+# --- x11-start ---
+cat > "$PREFIX/bin/x11-start" <<"EOS"
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+say(){ printf "\033[1;32m[*]\033[0m %s\n" "$*"; }
+warn(){ printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
+err(){ printf "\033[1;31m[x]\033[0m %s\n" "$*"; }
+
+command -v termux-x11 >/dev/null 2>&1 || { err "Thiếu 'termux-x11'. Chạy: pkg install x11-repo termux-x11"; exit 1; }
+
+# tạo thư mục socket nếu thiếu
+mkdir -p "$PREFIX/var/run/X11-unix" "$PREFIX/tmp/.X11-unix"
+
+# khởi bridge nếu socket chưa có
+if ! { [ -S "$PREFIX/var/run/X11-unix/X0" ] || [ -S "$PREFIX/tmp/.X11-unix/X0" ]; }; then
+  warn "Mở app Termux X11 (màn đen) nếu chưa mở. Khởi bridge :0…"
+  ( termux-x11 :0 >/dev/null 2>&1 & )
+fi
+
+# đợi socket
+for _ in {1..120}; do
+  if [ -S "$PREFIX/var/run/X11-unix/X0" ] || [ -S "$PREFIX/tmp/.X11-unix/X0" ]; then
+    say "X11 sẵn sàng."
+    exit 0
+  fi
+  sleep 0.1
+done
+err "Không thấy socket X11. Hãy đảm bảo app Termux X11 đang mở."
+EOS
+chmod +x "$PREFIX/bin/x11-start"
+
+# --- x11-stop ---
+cat > "$PREFIX/bin/x11-stop" <<"EOS"
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+say(){ printf "\033[1;32m[*]\033[0m %s\n" "$*"; }
+warn(){ printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
+
+# tắt bridge & virgl
+pkill -f termux-x11 >/dev/null 2>&1 || true
+pkill -f virgl_test_server_android >/dev/null 2>&1 || true
+# optional: ép dừng app Termux X11 (nếu máy cho phép)
+command -v am >/dev/null 2>&1 && am force-stop com.termux.x11 >/dev/null 2>&1 || true
+
+say "Đã dừng bridge X11. (Không xoá socket để lần sau khởi nhanh.)"
+EOS
+chmod +x "$PREFIX/bin/x11-stop"
+
+# --- x11-reset (cấp cứu) ---
+cat > "$PREFIX/bin/x11-reset" <<"EOS"
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+say(){ printf "\033[1;32m[*]\033[0m %s\n" "$*"; }
+warn(){ printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
+err(){ printf "\033[1;31m[x]\033[0m %s\n" "$*"; }
+
+pkill -f termux-x11 >/dev/null 2>&1 || true
+pkill -f virgl_test_server_android >/dev/null 2>&1 || true
+command -v am >/dev/null 2>&1 && am force-stop com.termux.x11 >/dev/null 2>&1 || true
+
+rm -rf "$PREFIX/var/run/X11-unix" "$PREFIX/tmp/.X11-unix"
+mkdir -p "$PREFIX/var/run/X11-unix" "$PREFIX/tmp/.X11-unix"
+
+warn "Mở app Termux X11 (màn đen)… khởi bridge :0"
+( termux-x11 :0 >/dev/null 2>&1 & )
+
+for _ in {1..120}; do
+  if [ -S "$PREFIX/var/run/X11-unix/X0" ] || [ -S "$PREFIX/tmp/.X11-unix/X0" ]; then
+    say "X11 đã reset xong."
+    exit 0
+  fi
+  sleep 0.1
+done
+err "Reset không thành công. Hãy mở app Termux X11 rồi chạy lại."
+EOS
+chmod +x "$PREFIX/bin/x11-reset"
+
+# --- dx (launcher desktop) ---
+cat > "$PREFIX/bin/dx" <<"EOS"
+#!/data/data/com.termux/files/usr/bin/bash
+# Desktop launcher (Debian XFCE qua Termux X11)
+set -euo pipefail
+say(){ printf "\033[1;32m[*]\033[0m %s\n" "$*"; }
+err(){ printf "\033[1;31m[x]\033[0m %s\n" "$*"; }
+
+CFG="$HOME/.debian-x11.conf"; [ -f "$CFG" ] && . "$CFG"
+: "${USER_NAME:=droid}"
+
+export DISPLAY=:0
+export PULSE_SERVER=127.0.0.1
+# comment 2 dòng dưới nếu 3D lỗi
+export MESA_GL_VERSION_OVERRIDE=4.5
+export GALLIUM_DRIVER=virpipe
+
+# đảm bảo pulseaudio
+pgrep -x pulseaudio >/dev/null 2>&1 || pulseaudio --start --load="module-native-protocol-tcp auth-ip-acl=127.0.0.1 listen=127.0.0.1" --exit-idle-time=-1
+
+# virgl (tuỳ chọn)
+if command -v virgl_test_server_android >/dev/null 2>&1 && ! pgrep -f virgl_test_server_android >/dev/null 2>&1; then
+  nohup virgl_test_server_android >/dev/null 2>&1 &
+fi
+
+# bật X11
+x11-start
+
+# chọn socket (ưu tiên var/run)
+SOCK_DIR=""
+if [ -S "$PREFIX/var/run/X11-unix/X0" ]; then
+  SOCK_DIR="$PREFIX/var/run/X11-unix"
+elif [ -S "$PREFIX/tmp/.X11-unix/X0" ]; then
+  SOCK_DIR="$PREFIX/tmp/.X11-unix"
+else
+  err "Không tìm thấy socket X11 sau khi x11-start."
+fi
+say "Socket X11: $SOCK_DIR"
+
+# chắc chắn có startxfce4
+if ! proot-distro login debian -- bash -lc 'command -v startxfce4 >/dev/null 2>&1'; then
+  err "Thiếu startxfce4. Chạy lại install.sh."
+fi
+
+# vào Debian & chạy XFCE
+exec proot-distro login debian \
+  --user "$USER_NAME" \
+  --bind "$PREFIX/tmp:/tmp" \
+  --bind "$SOCK_DIR:/tmp/.X11-unix" \
+  --bind "$PREFIX/tmp:/dev/shm" \
+  -- env -u WAYLAND_DISPLAY \
+     DISPLAY=":0" PULSE_SERVER="$PULSE_SERVER" XAUTHORITY= \
+     dbus-launch startxfce4
+EOS
+chmod +x "$PREFIX/bin/dx"
+
+say "Đã cài lệnh: dx, x11-start, x11-stop, x11-reset (có trong PATH)."
