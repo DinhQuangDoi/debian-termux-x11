@@ -6,11 +6,10 @@ chạy trực tiếp qua Termux X11 (không dùng VNC).
 ## Cài đặt
 - Tải và cài đặt Termux[Termux](https://termux.com) apk [Đây](https://f-droid.org/repo/com.termux_118.apk)
 
-Dán 1 lệnh duy nhất vào Termux:
+Dán lệnh vào Termux:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/main/install.sh)
-
 ```
 Script sẽ:
 
