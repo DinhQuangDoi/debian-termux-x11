@@ -1,18 +1,18 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# install.sh – Termux → Debian XFCE qua Termux X11 (không VNC)
+# install.sh – Termux → Debian XFCE qua Termux X11 (không VNC), có user thường + sudo NOPASSWD
 set -euo pipefail
+
+# ====== TUỲ CHỈNH ======
+USER_NAME="${USER_NAME:-droid}"   # đổi tên user tại đây nếu muốn
+# =======================
 
 say() { printf "\033[1;32m[*]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[x]\033[0m %s\n" "$*"; }
-
 trap 'err "Script lỗi ở dòng $LINENO"; exit 1' ERR
 
 # 0) Bắt buộc chạy trong Termux
-if [ -z "${PREFIX:-}" ] || [ ! -d "$PREFIX" ]; then
-  err "Không phải môi trường Termux. Hãy chạy script trong Termux."
-  exit 1
-fi
+[ -n "${PREFIX:-}" ] && [ -d "$PREFIX" ] || { err "Không phải môi trường Termux."; exit 1; }
 
 # 1) Cập nhật & cài gói Termux
 say "Cập nhật Termux & cài gói cần thiết…"
@@ -20,7 +20,7 @@ pkg update -y && pkg upgrade -y
 pkg install -y x11-repo proot-distro pulseaudio
 pkg install -y virglrenderer-android >/dev/null 2>&1 || true   # tùy chọn
 
-# 2) Cài Debian nếu CHƯA có (kiểm tra bằng login thay vì grep)
+# 2) Cài Debian nếu CHƯA có
 if proot-distro login debian -- true >/dev/null 2>&1; then
   say "Debian đã tồn tại, bỏ qua bước cài."
 else
@@ -28,20 +28,38 @@ else
   proot-distro install debian
 fi
 
-# 3) Bootstrap bên trong Debian (luôn chạy để đảm bảo đủ gói)
-say "Cấu hình Debian (XFCE, dbus-x11, firefox-esr, fonts, v.v.)…"
-proot-distro login debian -- bash -lc '
+# 3) Bootstrap bên trong Debian (GUI, sudo, user thường, shm)
+say "Cấu hình Debian (XFCE, dbus-x11, firefox-esr, fonts, sudo, user)…"
+proot-distro login debian -- bash -lc "
   set -e
   export DEBIAN_FRONTEND=noninteractive
   apt update
   apt install -y xfce4 xfce4-goodies dbus-x11 x11-apps \
                  firefox-esr thunar thunar-archive-plugin p7zip-full \
                  pulseaudio-utils fonts-dejavu fonts-noto fonts-noto-cjk \
-                 mousepad vlc
+                 mousepad vlc sudo
   mkdir -p /dev/shm && chmod 1777 /dev/shm
-'
 
-# 4) Tạo launcher ~/start-debian-x11 (idempotent)
+  # Tạo user nếu chưa có, thêm vào sudo
+  if ! id -u '${USER_NAME}' >/dev/null 2>&1; then
+    adduser --disabled-password --gecos '' '${USER_NAME}'
+  fi
+  usermod -aG sudo '${USER_NAME}'
+
+  # Cấp sudo full quyền không cần mật khẩu cho user
+  echo '${USER_NAME} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-${USER_NAME}
+  chmod 0440 /etc/sudoers.d/99-${USER_NAME}
+
+  # (Tuỳ chọn) locale cơ bản để app GUI bớt cảnh báo
+  if ! locale -a | grep -qi 'en_US.utf8'; then
+    apt install -y locales
+    sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen || true
+    locale-gen en_US.UTF-8 || true
+    update-locale LANG=en_US.UTF-8 || true
+  fi
+"
+
+# 4) Tạo launcher ~/start-debian-x11 (chạy dưới user thường)
 say "Tạo launcher ~/start-debian-x11…"
 cat > "$HOME/start-debian-x11" <<'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
@@ -50,6 +68,14 @@ set -euo pipefail
 say() { printf "\033[1;32m[*]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[x]\033[0m %s\n" "$*"; }
+
+# ĐỌC USER_NAME từ file cấu hình tạo lúc cài
+CFG="$HOME/.debian-x11.conf"
+if [ -f "$CFG" ]; then
+  # shellcheck disable=SC1090
+  . "$CFG"
+fi
+: "${USER_NAME:=droid}"
 
 # 1) Khởi động PulseAudio nếu chưa chạy
 if ! pgrep -x pulseaudio >/dev/null 2>&1; then
@@ -85,10 +111,11 @@ fi
 warn "Hãy mở ứng dụng Termux X11 (màn hình đen) trước khi tiếp tục."
 sleep 1
 
-# 6) Vào Debian & khởi động XFCE
+# 6) Vào Debian với user thường & khởi động XFCE
 # - Bind $PREFIX/tmp → /tmp để chia sẻ socket X11 (:0)
 # - Bind $PREFIX/tmp → /dev/shm để thay thế shared memory
 proot-distro login debian \
+  --user "$USER_NAME" \
   --bind "$PREFIX/tmp:/tmp" \
   --bind "$PREFIX/tmp:/dev/shm" \
   -- env -u WAYLAND_DISPLAY \
@@ -97,7 +124,10 @@ proot-distro login debian \
 EOF
 chmod +x "$HOME/start-debian-x11"
 
-# 5) Alias tiện
+# 5) Lưu cấu hình để launcher biết user
+printf 'USER_NAME=%s\n' "$USER_NAME" > "$HOME/.debian-x11.conf"
+
+# 6) Alias tiện
 grep -q 'start-debian-x11' "$HOME/.bashrc" 2>/dev/null || \
   echo 'alias debian-x11="~/start-debian-x11"' >> "$HOME/.bashrc"
 
