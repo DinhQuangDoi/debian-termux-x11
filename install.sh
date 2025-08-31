@@ -35,7 +35,7 @@ USER_PASS="$USER_PASS_1"; unset USER_PASS_1 USER_PASS_2
 # 2) Gói Termux
 say "Cập nhật & cài gói Termux…"
 pkg update -y && pkg upgrade -y
-pkg install -y x11-repo proot-distro pulseaudio termux-x11
+pkg install -y termux-x11 termux-x11-repo proot-distro pulseaudio
 pkg install -y virglrenderer-android >/dev/null 2>&1 || true  # tùy chọn
 
 # 3) Cài Debian nếu chưa có
