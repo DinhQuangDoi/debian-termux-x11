@@ -7,8 +7,10 @@ chạy trực tiếp qua Termux X11 (không dùng VNC).
 - Tải và cài đặt Termux[Termux](https://termux.com) apk [Đây](https://f-droid.org/repo/com.termux_118.apk)
 
 Dán lệnh vào Termux:
-
-```bash
+```
+pkg install -y x11-repo termux-x11
+```
+```
 bash <(curl -fsSL https://raw.githubusercontent.com/DinhQuangDoi/debian-termux-x11/main/install.sh)
 ```
 Script sẽ:
