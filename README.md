@@ -9,7 +9,7 @@ chạy trực tiếp qua Termux X11 (không dùng VNC).
 Dán lệnh vào Termux:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/DinhQuangDoi/debian-termux-x11/main/install.sh)
 ```
 Script sẽ:
 
